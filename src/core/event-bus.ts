@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ArrayToSet, ExtractFromSet, MergeFunctionParameters, TupleToObject } from "./type-helpers";
 
 export type EventMetadata = {
   eventId: string;
@@ -6,95 +7,118 @@ export type EventMetadata = {
   name: string;
 };
 
-export type MergeListenerArgs<T extends any[]> = T[number] extends (...args: any[]) => any
-  ? Parameters<T[number]>
-  : T extends (infer U)[] ? U : never;
-
 export type EventListener<T> = (
-  ...args: T extends any[] ? T : [T]
+  payload: T
 ) => void;
 
-export type EventListenerArgs<T> = T extends EventListener<infer U> 
-  ? U extends [EventMetadata, ...infer Rest] 
-    ? Rest 
-    : U 
-  : never;
-
-// Helper type to extract parameter names and types as an object
-export type FunctionArgsAsObject<T extends (...args: any[]) => any> = 
-  T extends (...args: infer P) => any 
-    ? P extends [EventMetadata, ...infer Rest]
-      ? Rest extends [infer First]
-        ? First // If only one argument is left, return it directly
-        : Rest extends Record<string, any>[]
-        ? Rest[0] // If it's an object already, return it directly
-        : { [K in keyof Rest]: Rest[K] } // Map positional arguments to an object
-      : {}
-    : never;
-
-// Main type that extracts argument names properly
-export type EventListenerArgsAsObject<T> = 
-  T extends EventListener<infer U> 
-    ? U extends [...infer Params] 
-      ? Params extends [EventMetadata, ...infer Rest] 
-        ? FunctionArgsAsObject<(...args: Rest) => void> 
-        : never
-      : never
-    : never;
 export type ExtendedEventListener<T> = (
-    metadata: EventMetadata,
-  ...args: T extends any[] ? T : [T]
-  ) => void;
+  payload: T,
+  metadata?: EventMetadata,
+) => void;
 
-export type Event<T> = {
+export type EventListenerArgs<T> = T extends EventListener<infer U> ? U : never;
+
+type EventRegistry<Key extends string | number | symbol, Listeners extends ExtendedEventListener<any>[], IsActive extends boolean> = {
+  [K in Key]: {
+    isActive: IsActive
+    listeners: ArrayToSet<Listeners>
+  }
+}
+
+type ActiveEventKeys<T extends Readonly<EventRegistry<any, any, any>>> = {
+  [K in keyof T as T[K]['isActive'] extends true ? K : never]: T[K]
+};
+
+type TestReg = EventRegistry<"test", [], false>
+type TestActive = ActiveEventKeys<TestReg>
+
+export type Event<T extends Record<string, any>> = {
   listeners: EventListener<T>[];
 };
 
-export function createEvent<T>(
-  listeners: EventListener<T>[] = []
-): ExtendedEventListener<T>[] {
-  const res = (metadata: EventMetadata, ...args: T extends any[] ? T : [T]) => {
-    listeners.forEach(listener => listener(...args));
-  };
-  return [res]
-}
-export function createEventBus<T extends Record<string, ExtendedEventListener<any>[]>>(
-  events: { [K in keyof T]: T[K] }
-) {
-  const eventRegistry: { [K in keyof T]?: Set<ExtendedEventListener<T[K]>> } = {};
 
-  for (const key in events) {
-    eventRegistry[key] = new Set(Object.values(events));
+
+export class EventCreator<T extends MergeFunctionParameters<any>> {
+  private listeners: ExtendedEventListener<T>[];
+
+  constructor(listeners: ExtendedEventListener<T>[] = []) {
+    this.listeners = listeners;
   }
 
-  const on = <K extends keyof T>(
-    eventName: K,
-    listener: EventListener<T[K]>
-  ) => {
-    if (!eventRegistry[eventName]) {
-      eventRegistry[eventName] = new Set();
+  public create(): ExtendedEventListener<T>[] {
+    return this.listeners.map(listener =>
+      (payload: T, metadata?: EventMetadata) =>
+        listener(payload, metadata)
+    );
+  }
+
+  public addListener(listener: EventListener<T>): void {
+    this.listeners.push(listener);
+  }
+
+  public getListeners(): EventListener<T>[] {
+    return [...this.listeners];
+  }
+}
+
+export function createEvent<T extends MergeFunctionParameters<any>>(
+  ...listeners: ExtendedEventListener<T>[]
+): ExtendedEventListener<T>[] {
+  return new EventCreator(listeners).create();
+}
+
+export class EventBus<
+  TEvents extends Record<string, ExtendedEventListener<any>[]>,
+  K extends keyof TEvents,
+  Listeners extends ExtendedEventListener<any>[]
+> {
+
+  constructor(events: TEvents, private eventRegistry: EventRegistry<keyof TEvents, Listeners, any> = {} as EventRegistry<keyof TEvents, Listeners, true>) {
+    for (const key in events) {
+      this.eventRegistry[key] = {
+        isActive: true,
+        listeners: new Set(events[key]) as ArrayToSet<Listeners>,
+      }
     }
-    const wrappedListener = (metadata: EventMetadata,...args: T[K]) => {
-      listener(...args);
+  }
+
+  // public on<K extends keyof T>(eventName: K, listener: EventListener<T[K]>): void {
+  //   if (!this.eventRegistry[eventName]) {
+  //     this.eventRegistry[eventName] = new Set();
+  //   }
+  //   const wrappedListener = (metadata: EventMetadata, payload: T[K]) => {
+  //     listener(payload);
+  //   };
+  //   this.eventRegistry[eventName]!.add(wrappedListener as ExtendedEventListener<T[K]>);
+  // }
+
+  public off(eventName: keyof typeof this.eventRegistry): void {
+    // public off(eventName: ActiveEventKeys<Readonly<typeof this.eventRegistry>>): void {
+    this.eventRegistry[eventName] = {
+      isActive: false,
+      listeners: new Set() as ArrayToSet<Listeners>,
     };
-    eventRegistry[eventName]!.add(wrappedListener as ExtendedEventListener<T[K]>);
-  };
+  }
 
-  const off = <K extends keyof T>(
-    eventName: K,
-    listener: ExtendedEventListener<T[K]>
-  ) => {
-    eventRegistry[eventName]?.delete(listener);
-  };
-
-  const emit = <K extends keyof T>(eventName: K, args: EventListenerArgsAsObject<T[K][number]>) => {
+  public emit(eventName: keyof typeof this.eventRegistry, payload: EventListenerArgs<ExtractFromSet<typeof this.eventRegistry[keyof TEvents]["listeners"]>>): void {
     const eventMetadata: EventMetadata = {
       eventId: randomUUID(),
       timestamp: Date.now(),
       name: eventName as string,
     };
-    eventRegistry[eventName]?.forEach((listener) => listener(eventMetadata, ...args));
-  };
+    this.eventRegistry[eventName]?.listeners.forEach((listener) => {
+      listener(payload, eventMetadata)
+    });
+    this.eventRegistry[eventName]?.listeners.values().toArray()
+  }
 
-  return { on, off, emit };
+  public getListenerCount(eventName: K): number {
+    return this.eventRegistry[eventName]?.listeners.size ?? 0;
+  }
+}
+
+export function createEventBus<T extends Record<string, ExtendedEventListener<any>[]>>(
+  events: { [K in keyof T]: T[K] }
+) {
+  return new EventBus<T, keyof T, T[keyof T]>(events);
 }
