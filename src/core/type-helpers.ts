@@ -41,3 +41,6 @@ export type MergeFunctionParameters<T extends any[]> = T extends [infer First, .
 export type ArrayToSet<T> = T extends Array<infer U> ? Set<U> : never;
 
 export type ExtractFromSet<T> = T extends Set<infer U> ? U : never;
+
+export type Pretty<T> = { [K in keyof T]: T[K] }& {}
+export type Merge<T, U> = Pretty<Omit<T, keyof U> & U>
