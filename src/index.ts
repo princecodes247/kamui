@@ -1,1 +1,1 @@
-export { createEventBus } from "./core/event-bus";
+export { createEventBus, EventListener } from "./core/event-bus";

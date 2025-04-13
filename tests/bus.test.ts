@@ -25,7 +25,8 @@ describe("EventBus", () => {
     const event = createEvent(listener);
     let bus = createEventBus({ "team.joined": event })
       .off("team.joined")
-      // .off("team.joined");
+      // @ts-expect-error
+      .off("team.joined");
 
     // @ts-expect-error
     bus.emit("team.joined", { arg: "test", form: false });
@@ -115,5 +116,36 @@ describe("EventBus", () => {
     bus.emit("order.status", mockRes);
 
     expect(listener).toHaveBeenCalledWith(mockRes, expect.any(Object));
+  });
+
+  describe("getListenerCount", () => {
+    it("should return correct count for initial and added listeners", () => {
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
+      const bus = createEventBus({ test: [listener1, listener2] });
+
+      expect(bus.getListenerCount("test")).toBe(2);
+
+      bus.on("test", [vi.fn()]);
+      expect(bus.getListenerCount("test")).toBe(3);
+    });
+
+    it("should return 0 after removing all listeners", () => {
+      const listener = vi.fn();
+      const bus = createEventBus({ test: [listener] });
+
+      expect(bus.getListenerCount("test")).toBe(1);
+      bus.off("test");
+      expect(bus.getListenerCount("test")).toBe(0);
+    });
+
+    // it("should work with custom adapter", () => {
+    //   const adapter = new NodeEventsAdapter();
+    //   const bus = createEventBus({ test: [vi.fn()] }, adapter);
+
+    //   expect(bus.getListenerCount("test")).toBe(1);
+    //   bus.off("test");
+    //   expect(bus.getListenerCount("test")).toBe(0);
+    // });
   });
 });

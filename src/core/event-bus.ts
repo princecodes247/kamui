@@ -32,8 +32,8 @@ export class EventCreator<T> {
     this.listeners.push(listener);
   }
 
-  public getListeners() {
-    
+  public getListeners(): EventListener<T>[] {
+    return [...this.listeners];
   }
 }
 
@@ -43,13 +43,22 @@ export function createEvent<T>(
   return new EventCreator(listeners).create();
 }
 
+export interface PlatformAdapter<T> {
+  emit(eventName: string, payload: T, metadata: EventMetadata, eventRegistry?: EventRegistry<any>): void;
+  on(eventName: string, listener: EventListener<T>, eventRegistry?: EventRegistry<any>): void;
+  off(eventName: string, eventRegistry?: EventRegistry<any>): void;
+  getListenerCount(eventName: string, eventRegistry?: EventRegistry<any>): number;
+}
+
 export class EventBus<TEvents extends Record<string, EventListener<any>[]>> {
+  private adapter: PlatformAdapter<any>;
+
   constructor(
     events: TEvents,
-    private eventRegistry: EventRegistry<keyof TEvents> = {} as EventRegistry<
-      keyof TEvents
-    >
+    adapter?: PlatformAdapter<any>,
+    private eventRegistry: EventRegistry<keyof TEvents> = {} as EventRegistry<keyof TEvents>
   ) {
+    this.adapter = adapter || new DefaultPlatformAdapter();
     for (const key in events) {
       this.eventRegistry[key] = {
         isActive: true,
@@ -67,10 +76,7 @@ export class EventBus<TEvents extends Record<string, EventListener<any>[]>> {
       timestamp: Date.now(),
       name: eventName as string,
     };
-    this.eventRegistry[eventName]?.listeners.forEach((listener) => {
-      listener(payload, eventMetadata);
-    });
-    this.eventRegistry[eventName]?.listeners.values().toArray();
+    this.adapter.emit(eventName as string, payload, eventMetadata, this.eventRegistry);
   }
 
   public on<T extends string, U extends EventListener<any>[]>(
@@ -84,18 +90,47 @@ export class EventBus<TEvents extends Record<string, EventListener<any>[]>> {
       };
     }
     for (const listener of listeners) {
-      this.eventRegistry[eventName].listeners.add(listener);
+      this.adapter.on(eventName, listener, this.eventRegistry);
     }
     return this as EventBus<Merge<TEvents, { [K in T]: U }>>;
   }
 
   public off<T extends keyof TEvents>(eventName: T) {
-    this.eventRegistry[eventName].listeners.clear();
+
+    this.adapter.off(eventName as string, this.eventRegistry);
     return this as EventBus<Pretty<Omit<TEvents, T>>>;
   }
 
   public getListenerCount<T extends keyof TEvents>(eventName: T): number {
-    return this.eventRegistry[eventName].listeners.size;
+    return this.adapter.getListenerCount(eventName as string, this.eventRegistry);
+  }
+}
+
+class DefaultPlatformAdapter implements PlatformAdapter<any> {
+
+  emit(eventName: string, payload: any, metadata: EventMetadata, eventRegistry?: EventRegistry<any>): void {
+    if (eventRegistry && eventRegistry[eventName] && eventRegistry[eventName].isActive) {
+      eventRegistry[eventName]?.listeners.forEach((listener) => {
+        listener(payload, metadata);
+      });
+    }
+  }
+
+  on(eventName: string, listener: EventListener<any>, eventRegistry?: EventRegistry<any>): void {
+    if (eventRegistry && eventRegistry[eventName] && eventRegistry[eventName].isActive) {
+      eventRegistry[eventName]?.listeners.add(listener);
+    }
+  }
+  off(eventName: string, eventRegistry?: EventRegistry<any>): void {
+    if (eventRegistry && eventRegistry[eventName] && eventRegistry[eventName].isActive) {
+      eventRegistry[eventName]?.listeners.clear();
+    }
+  }
+  getListenerCount(eventName: string, eventRegistry?: EventRegistry<any>): number {
+    if (eventRegistry && eventRegistry[eventName] && eventRegistry[eventName].isActive) {
+      return eventRegistry[eventName]?.listeners.size || 0;
+    }
+    return 0;
   }
 }
 
