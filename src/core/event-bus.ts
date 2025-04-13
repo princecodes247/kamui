@@ -25,19 +25,6 @@ type EventRegistry<Key extends string | number | symbol, Listeners extends Exten
   }
 }
 
-type ActiveEventKeys<T extends Readonly<EventRegistry<any, any, any>>> = {
-  [K in keyof T as T[K]['isActive'] extends true ? K : never]: T[K]
-};
-
-type TestReg = EventRegistry<"test", [], false>
-type TestActive = ActiveEventKeys<TestReg>
-
-export type Event<T extends Record<string, any>> = {
-  listeners: EventListener<T>[];
-};
-
-
-
 export class EventCreator<T extends MergeFunctionParameters<any>> {
   private listeners: ExtendedEventListener<T>[];
 
@@ -82,23 +69,6 @@ export class EventBus<
     }
   }
 
-  // public on<K extends keyof T>(eventName: K, listener: EventListener<T[K]>): void {
-  //   if (!this.eventRegistry[eventName]) {
-  //     this.eventRegistry[eventName] = new Set();
-  //   }
-  //   const wrappedListener = (metadata: EventMetadata, payload: T[K]) => {
-  //     listener(payload);
-  //   };
-  //   this.eventRegistry[eventName]!.add(wrappedListener as ExtendedEventListener<T[K]>);
-  // }
-
-  public off(eventName: keyof typeof this.eventRegistry): void {
-    // public off(eventName: ActiveEventKeys<Readonly<typeof this.eventRegistry>>): void {
-    this.eventRegistry[eventName] = {
-      isActive: false,
-      listeners: new Set() as ArrayToSet<Listeners>,
-    };
-  }
 
   public emit(eventName: keyof typeof this.eventRegistry, payload: EventListenerArgs<ExtractFromSet<typeof this.eventRegistry[keyof TEvents]["listeners"]>>): void {
     const eventMetadata: EventMetadata = {
